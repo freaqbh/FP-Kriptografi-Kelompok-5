@@ -8,4 +8,8 @@ if (!supabaseUrl || !supabaseKey) {
 }
 
 const supabase = createClient(supabaseUrl, supabaseKey);
-export default supabase;
+if (!supabase) {
+  throw new Error('Failed to create Supabase client');
+}
+
+module.exports = { supabase };

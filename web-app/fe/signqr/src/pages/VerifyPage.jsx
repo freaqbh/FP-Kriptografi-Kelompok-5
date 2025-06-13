@@ -66,9 +66,8 @@ export default function VerifyPage() {
 
     try {
       const payload = {
-        fileName: document.fileName,
+        documentId: id, // Gunakan 'id' dari useParams()
         publicKey: inputPublicKey,
-        signature: document.signature,
       };
       const res = await axios.post(`http://localhost:5000/verify`, payload);
       setVerificationResult(res.data);

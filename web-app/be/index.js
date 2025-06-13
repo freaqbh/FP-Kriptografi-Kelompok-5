@@ -109,59 +109,61 @@ app.post("/sign", upload.single("file"), (req, res) => {
 // =================================================================
 // ENDPOINT UNTUK VERIFIKASI (Tidak Diubah, tapi lebih aman sekarang)
 // =================================================================
-app.post("/verify", (req, res) => {
-  let { fileName, publicKey, signature } = req.body;
+// ENDPOINT BARU UNTUK VERIFIKASI
+app.post("/verify", async (req, res) => {
+  // Input endpoint diubah untuk keamanan dan efisiensi
+  const { documentId, publicKey: publicKeyString } = req.body;
+
+  if (!documentId || !publicKeyString) {
+    return res.status(400).send({ verify: false, error: "Document ID and Public Key are required." });
+  }
   
-    publicKey = crypto.createPublicKey({
-      key: Buffer.from(publicKey, "base64"),
+  try {
+    // 1. Ambil metadata dokumen dari Firestore
+    const doc = await db.collection('documents').doc(documentId).get();
+
+    if (!doc.exists) {
+      return res.status(404).send({ verify: false, error: "Document not found" });
+    }
+
+    const { fileName, signature: storedSignature } = doc.data();
+    
+    // 2. Unduh file dari Supabase Storage untuk diverifikasi
+    const { data: fileBlob, error: downloadError } = await supabase.storage
+      .from('files')
+      .download(fileName);
+
+    if (downloadError) {
+      throw new Error("Could not download file from storage for verification.");
+    }
+
+    const fileBuffer = Buffer.from(await fileBlob.arrayBuffer());
+
+    // 3. Siapkan public key
+    const publicKey = crypto.createPublicKey({
+      key: Buffer.from(publicKeyString, "base64"),
       type: "spki",
       format: "der",
     });
-  
-    db.collection("documents")
-      .where("fileName", "==", fileName)
-      .get()
-      .then((querySnapshot) => {
-        if (querySnapshot.empty) {
-          res.send({ verify: false, error: "Document not found" });
-        } else {
-          querySnapshot.forEach((doc) => {
-            const storedSignature = doc.data().signature;
-            const fileContentBase64 = doc.data().fileContent;
-            const fileBuffer = Buffer.from(fileContentBase64, "base64");
-  
-            const verify = crypto.createVerify("SHA256");
-            verify.update(fileBuffer);
-            verify.end();
-  
-            try {
-              const result = verify.verify(publicKey, Buffer.from(signature, "base64"));
-  
-              if (result) {
-                const storageRef = storage.ref(`files/${fileName}`);
-                storageRef
-                  .getDownloadURL()
-                  .then((url) => {
-                    res.send({ fileName, signature, verify: true, fileURL: url });
-                  })
-                  .catch((error) => {
-                    console.error("Failed to get file download URL:", error);
-                    res.status(500).send({ error: "Failed to get file download URL" });
-                  });
-              } else {
-                res.send({ fileName, signature, verify: false });
-              }
-            } catch (error) {
-              console.error("Error during verification:", error);
-              res.status(500).send({ error: "Error during verification" });
-            }
-          });
-        }
-      })
-      .catch((error) => {
-        console.error("Failed to verify document:", error);
-        res.status(500).send({ error: "Failed to verify document" });
-      });
+
+    // 4. Verifikasi tanda tangan terhadap file yang diunduh
+    const verify = crypto.createVerify("SHA256");
+    verify.update(fileBuffer);
+    verify.end();
+
+    const result = verify.verify(publicKey, Buffer.from(storedSignature, "base64"));
+
+    if (result) {
+      // 5. Jika berhasil, dapatkan URL publik dari Supabase
+      const { data: urlData } = supabase.storage.from('files').getPublicUrl(fileName);
+      res.send({ fileName, signature: storedSignature, verify: true, fileURL: urlData.publicUrl });
+    } else {
+      res.send({ fileName, signature: storedSignature, verify: false, error: "Signature is not valid." });
+    }
+  } catch (error) {
+    console.error("Error during verification:", error);
+    res.status(500).send({ error: "An error occurred during verification. Check if the Public Key is correct." });
+  }
 });
 
 // =================================================================

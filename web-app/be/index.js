@@ -3,7 +3,8 @@ const app = express();
 const port = 5000;
 const crypto = require('crypto');
 const multer = require("multer");
-const { db, storage } = require ('./config');
+const { db } = require ('./config');
+const { supabase } = require('./supabaseClient');
 
 const upload = multer({ storage: multer.memoryStorage() });
 
